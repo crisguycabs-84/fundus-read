@@ -23,7 +23,7 @@ def login(data: LoginRequest):
     cur = conn.cursor()
 
     cur.execute(
-        'SELECT password_hash, is_active FROM "Usuarios" WHERE cc = %s',
+        'SELECT password_hash, is_active FROM Usuarios WHERE cc = %s',
         (data.cc,)
     )
     row = cur.fetchone()
