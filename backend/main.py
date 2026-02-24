@@ -1,19 +1,26 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from passlib.context import CryptContext
+import os
+import psycopg2
 
 app = FastAPI(title="fundus-read api")
+
+# bcrypt context (para verificar contra password_hash)
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+class LoginRequest(BaseModel):
+    cc: str
+    password: str
 
 @app.get("/health")
 def health():
     return {"status": "ok"}
 
-from pydantic import BaseModel
-from passlib.context import CryptContext
-
-from fastapi import HTTPException
-import os, psycopg2
-
 @app.post("/auth/login")
 def login(data: LoginRequest):
+    conn = None
+    cur = None
     try:
         conn = psycopg2.connect(os.environ["DATABASE_URL"])
         cur = conn.cursor()
@@ -23,18 +30,18 @@ def login(data: LoginRequest):
         )
         row = cur.fetchone()
     except Exception as e:
-        # Esto hará que Swagger muestre el error exacto
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        try: cur.close()
-        except: pass
-        try: conn.close()
-        except: pass
+        if cur is not None:
+            cur.close()
+        if conn is not None:
+            conn.close()
 
     if not row:
         return {"success": False, "message": "Usuario no encontrado"}
 
     password_hash, is_active = row
+
     if not is_active:
         return {"success": False, "message": "Usuario inactivo"}
 
