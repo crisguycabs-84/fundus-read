@@ -40,14 +40,23 @@ ALTER TABLE ModoLectura ADD CONSTRAINT PK_ModoLectura PRIMARY KEY (modo_id);
 
 
 CREATE TABLE Usuarios (
- user_id VARCHAR(36) NOT NULL,
- email VARCHAR(150) NOT NULL,
- password VARCHAR(255) NOT NULL,
- is_active BIT(1) DEFAULT '1' NOT NULL,
- escalafon_id SMALLINT NOT NULL
+  user_id VARCHAR(36) NOT NULL,
+  email VARCHAR(150) NOT NULL,
+  cc VARCHAR(50) NOT NULL,
+  telefono VARCHAR(20),
+  password_hash VARCHAR(255) NOT NULL,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  role VARCHAR(20) NOT NULL DEFAULT 'reader',
+  escalafon_id SMALLINT NOT NULL,
+  failed_attempts INTEGER NOT NULL DEFAULT 0,
+  locked_until TIMESTAMPTZ NULL,
+  last_login_at TIMESTAMPTZ NULL,
+  CONSTRAINT PK_Usuarios PRIMARY KEY (user_id),
+  CONSTRAINT UQ_Usuarios_email UNIQUE (email),
+  CONSTRAINT FK_Usuarios_0
+    FOREIGN KEY (escalafon_id)
+    REFERENCES "Escalafon"(escalafon_id)
 );
-
-ALTER TABLE Usuarios ADD CONSTRAINT PK_Usuarios PRIMARY KEY (user_id);
 
 
 CREATE TABLE Gradcam (
@@ -77,10 +86,6 @@ ALTER TABLE Lecturas ADD CONSTRAINT PK_Lecturas PRIMARY KEY (lectura_id);
 
 
 ALTER TABLE Imagenes ADD CONSTRAINT FK_Imagenes_0 FOREIGN KEY (clase_id) REFERENCES Clase (clase_id);
-
-
-ALTER TABLE Usuarios ADD CONSTRAINT FK_Usuarios_0 FOREIGN KEY (escalafon_id) REFERENCES Escalafon (escalafon_id);
-
 
 ALTER TABLE Gradcam ADD CONSTRAINT FK_Gradcam_0 FOREIGN KEY (clase2_id) REFERENCES Clase (clase_id);
 ALTER TABLE Gradcam ADD CONSTRAINT FK_Gradcam_1 FOREIGN KEY (clase1_id) REFERENCES Clase (clase_id);
