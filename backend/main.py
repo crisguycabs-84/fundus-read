@@ -144,3 +144,29 @@ def reading_next(
         "posicion": posicion,
         "modo_id": modo_id
     }
+    
+@app.get("/images/{img_id}")
+def get_image_url(img_id: str):
+    try:
+        conn = psycopg2.connect(os.environ["DATABASE_URL"])
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT img_id, url, clase_id
+            FROM public.imagenes
+            WHERE img_id = %s
+            """,
+            (img_id,)
+        )
+        row = cur.fetchone()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if "cur" in locals(): cur.close()
+        if "conn" in locals(): conn.close()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Imagen no encontrada")
+
+    img_id_db, url, clase_id = row
+    return {"img_id": img_id_db, "url": url, "clase_id": clase_id}
