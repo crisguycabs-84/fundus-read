@@ -210,3 +210,24 @@ def get_gradcams(img_id: str):
         "img_id": img_id,
         "gradcams": gradcams
     }
+
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
+STATIC_DIR = BASE_DIR / "static"
+
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+@app.get("/")
+def ui_index():
+    return FileResponse(STATIC_DIR / "index.html")
+
+@app.get("/mode")
+def ui_mode():
+    return FileResponse(STATIC_DIR / "mode.html")
+
+@app.get("/read")
+def ui_read():
+    return FileResponse(STATIC_DIR / "read.html")
