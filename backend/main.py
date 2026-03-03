@@ -1,51 +1,92 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response, Cookie
 from pydantic import BaseModel
 from passlib.context import CryptContext
+from jose import jwt, JWTError
+from datetime import datetime, timedelta, timezone
 import os
 import psycopg2
 
 app = FastAPI(title="fundus-read api")
 
-# bcrypt context (para verificar contra password_hash)
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+JWT_SECRET = os.environ["JWT_SECRET"]
+JWT_ALG = "HS256"
+JWT_EXPIRES_MIN = int(os.environ.get("JWT_EXPIRES_MIN", "480"))
 
 class LoginRequest(BaseModel):
     cc: str
     password: str
+
+def create_access_token(payload: dict) -> str:
+    exp = datetime.now(timezone.utc) + timedelta(minutes=JWT_EXPIRES_MIN)
+    to_encode = {**payload, "exp": exp}
+    return jwt.encode(to_encode, JWT_SECRET, algorithm=JWT_ALG)
 
 @app.get("/health")
 def health():
     return {"status": "ok"}
 
 @app.post("/auth/login")
-def login(data: LoginRequest):
-    conn = None
-    cur = None
+def login(data: LoginRequest, response: Response):
     try:
         conn = psycopg2.connect(os.environ["DATABASE_URL"])
         cur = conn.cursor()
         cur.execute(
-            "SELECT password_hash, is_active FROM usuarios WHERE cc = %s",
+            "SELECT user_id, password_hash, is_active, role FROM usuarios WHERE cc = %s",
             (data.cc,)
         )
         row = cur.fetchone()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        if cur is not None:
-            cur.close()
-        if conn is not None:
-            conn.close()
+        if "cur" in locals(): cur.close()
+        if "conn" in locals(): conn.close()
 
     if not row:
         return {"success": False, "message": "Usuario no encontrado"}
 
-    password_hash, is_active = row
+    user_id, password_hash, is_active, role = row
 
     if not is_active:
         return {"success": False, "message": "Usuario inactivo"}
 
+    # (opcional pero recomendable) evita el error de 72 bytes de bcrypt
+    if len(data.password.encode("utf-8")) > 72:
+        return {"success": False, "message": "Credenciales inválidas"}
+
     if not pwd_context.verify(data.password, password_hash):
         return {"success": False, "message": "Credenciales inválidas"}
 
+    token = create_access_token({"sub": str(user_id), "cc": data.cc, "role": role})
+
+    response.set_cookie(
+        key="access_token",
+        value=token,
+        httponly=True,
+        secure=True,      # en Railway vas por https
+        samesite="lax",   # mismo site
+        max_age=JWT_EXPIRES_MIN * 60,
+        path="/",
+    )
+
     return {"success": True}
+
+@app.post("/auth/logout")
+def logout(response: Response):
+    response.delete_cookie("access_token", path="/")
+    return {"success": True}
+
+@app.get("/auth/me")
+def me(access_token: str | None = Cookie(default=None)):
+    if not access_token:
+        raise HTTPException(status_code=401, detail="No autenticado")
+    try:
+        payload = jwt.decode(access_token, JWT_SECRET, algorithms=[JWT_ALG])
+        return {
+            "user_id": payload.get("sub"),
+            "cc": payload.get("cc"),
+            "role": payload.get("role"),
+        }
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Token inválido")
