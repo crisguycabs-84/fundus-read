@@ -12,7 +12,7 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 JWT_SECRET = os.environ["JWT_SECRET"]
 JWT_ALG = "HS256"
-JWT_EXPIRES_MIN = int(os.environ.get("JWT_EXPIRES_MIN", "480"))
+JWT_EXPIRES_MIN = int(os.environ.get("JWT_EXPIRES_MIN", "15"))
 
 class LoginRequest(BaseModel):
     cc: str
