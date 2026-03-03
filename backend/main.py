@@ -170,3 +170,43 @@ def get_image_url(img_id: str):
 
     img_id_db, url, clase_id = row
     return {"img_id": img_id_db, "url": url, "clase_id": clase_id}
+    
+@app.get("/gradcam/{img_id}")
+def get_gradcams(img_id: str):
+    try:
+        conn = psycopg2.connect(os.environ["DATABASE_URL"])
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT grad_id, modelo_id, clase1_id, clase2_id, url
+            FROM public.gradcam
+            WHERE img_id = %s
+            ORDER BY modelo_id ASC;
+            """,
+            (img_id,)
+        )
+        rows = cur.fetchall()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if "cur" in locals(): cur.close()
+        if "conn" in locals(): conn.close()
+
+    if not rows:
+        return {"found": False, "img_id": img_id, "gradcams": []}
+
+    gradcams = []
+    for grad_id, modelo_id, clase1_id, clase2_id, url in rows:
+        gradcams.append({
+            "grad_id": grad_id,
+            "modelo_id": modelo_id,
+            "clase1_id": clase1_id,
+            "clase2_id": clase2_id,
+            "url": url
+        })
+
+    return {
+        "found": True,
+        "img_id": img_id,
+        "gradcams": gradcams
+    }
