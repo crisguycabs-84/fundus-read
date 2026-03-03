@@ -90,3 +90,57 @@ def me(access_token: str | None = Cookie(default=None)):
         }
     except JWTError:
         raise HTTPException(status_code=401, detail="Token inválido")
+        
+from fastapi import Query
+
+@app.get("/reading/next")
+def reading_next(
+    modo_id: int = Query(..., description="0=no asistido, 1=asistido"),
+    access_token: str | None = Cookie(default=None),
+):
+    # 1) validar sesión (cookie con JWT)
+    if not access_token:
+        raise HTTPException(status_code=401, detail="No autenticado")
+
+    try:
+        payload = jwt.decode(access_token, JWT_SECRET, algorithms=[JWT_ALG])
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Token inválido")
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Token inválido")
+
+    # 2) SOLO LECTURA: primera lectura pendiente de ese usuario y modo
+    try:
+        conn = psycopg2.connect(os.environ["DATABASE_URL"])
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT lectura_id, img_id, posicion
+            FROM public.lecturas
+            WHERE user_id = %s
+              AND modo_id = %s
+              AND done IS NULL
+            ORDER BY posicion
+            LIMIT 1;
+            """,
+            (user_id, modo_id)
+        )
+        row = cur.fetchone()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if "cur" in locals(): cur.close()
+        if "conn" in locals(): conn.close()
+
+    if not row:
+        return {"found": False, "message": "No hay lecturas pendientes"}
+
+    lectura_id, img_id, posicion = row
+    return {
+        "found": True,
+        "lectura_id": lectura_id,
+        "img_id": img_id,
+        "posicion": posicion,
+        "modo_id": modo_id
+    }
