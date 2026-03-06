@@ -145,7 +145,7 @@ async function pageMode() {
   if (who) who.textContent = `Sesión: cc=${me.cc} • role=${me.role}`;
 
   if (btn0) btn0.addEventListener("click", () => {
-    window.location.href = "/read?modo_id=0";
+    window.location.href = "/na_read";
   });
 
   if (btn1) btn1.addEventListener("click", () => {
@@ -233,4 +233,113 @@ document.addEventListener("DOMContentLoaded", () => {
   if (page === "index") pageIndex();
   else if (page === "mode") pageMode();
   else if (page === "read") pageRead();
+  else if (page === "na_read") pageNaRead();
 });
+
+function addRadioOption(name, value, label) {
+  const root = qs("classOptions");
+  if (!root) return;
+
+  const wrap = document.createElement("label");
+  wrap.className = "label";
+  wrap.style.fontWeight = "400";
+  wrap.style.display = "flex";
+  wrap.style.alignItems = "center";
+  wrap.style.gap = "10px";
+  wrap.style.marginTop = "10px";
+
+  const input = document.createElement("input");
+  input.type = "radio";
+  input.name = name;
+  input.value = value;
+
+  const span = document.createElement("span");
+  span.textContent = label;
+
+  wrap.appendChild(input);
+  wrap.appendChild(span);
+  root.appendChild(wrap);
+}
+
+async function pageNaRead() {
+  setMsg("");
+
+  const meta = qs("meta");
+  const root = qs("images");
+  const optionsRoot = qs("classOptions");
+  const form = qs("diagnosisForm");
+  const btnNext = qs("btnNext");
+
+  const me = await ensureAuthOrRedirect();
+  if (!me) return;
+
+  if (root) root.innerHTML = "";
+  if (optionsRoot) optionsRoot.innerHTML = "";
+
+  const nextResp = await api("/reading/next-na");
+  if (!nextResp.res.ok) {
+    setMsg("Error /reading/next-na\nHTTP " + nextResp.res.status + "\n" + (nextResp.body?.detail || JSON.stringify(nextResp.body)));
+    return;
+  }
+
+  if (!nextResp.body || !nextResp.body.found) {
+    setMsg(nextResp.body?.message || "No hay lecturas pendientes");
+    return;
+  }
+
+  const { lectura_id, img_id, posicion, url } = nextResp.body;
+
+  if (meta) {
+    meta.textContent = `Usuario cc=${me.cc} • lectura_id=${lectura_id} • img_id=${img_id} • posición=${posicion}`;
+  }
+
+  addImageBlock("Fundus", url);
+
+  const clsResp = await api("/clases");
+  if (!clsResp.res.ok) {
+    setMsg("Error /clases\nHTTP " + clsResp.res.status + "\n" + (clsResp.body?.detail || JSON.stringify(clsResp.body)));
+    return;
+  }
+
+  const clases = (clsResp.body && clsResp.body.clases) ? clsResp.body.clases : [];
+  for (const c of clases) {
+    addRadioOption("diagnostico_clase_id", c.clase_id, c.nombre);
+  }
+
+  document.querySelectorAll('input[name="diagnostico_clase_id"]').forEach((el) => {
+    el.addEventListener("change", () => {
+      btnNext.disabled = !document.querySelector('input[name="diagnostico_clase_id"]:checked');
+    });
+  });
+
+  if (form) {
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+
+      const selected = document.querySelector('input[name="diagnostico_clase_id"]:checked');
+      if (!selected) {
+        setMsg("Debes seleccionar una clase diagnóstica");
+        return;
+      }
+
+      btnNext.disabled = true;
+
+      const submitResp = await api("/reading/submit-na", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          lectura_id: lectura_id,
+          diagnostico_clase_id: selected.value
+        }),
+      });
+
+      if (!submitResp.res.ok) {
+        btnNext.disabled = false;
+        setMsg("Error /reading/submit-na\nHTTP " + submitResp.res.status + "\n" + (submitResp.body?.detail || JSON.stringify(submitResp.body)));
+        return;
+      }
+
+      window.location.reload();
+    });
+  }
+}

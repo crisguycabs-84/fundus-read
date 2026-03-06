@@ -23,6 +23,10 @@ def create_access_token(payload: dict) -> str:
     to_encode = {**payload, "exp": exp}
     return jwt.encode(to_encode, JWT_SECRET, algorithm=JWT_ALG)
 
+class SubmitDiagnosisRequest(BaseModel):
+    lectura_id: str
+    diagnostico_clase_id: str
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -231,3 +235,164 @@ def ui_mode():
 @app.get("/read")
 def ui_read():
     return FileResponse(STATIC_DIR / "read.html")
+
+@app.get("/na_read")
+def ui_na_read():
+    return FileResponse(STATIC_DIR / "na_read.html")
+
+
+@app.get("/clases")
+def get_clases():
+    try:
+        conn = psycopg2.connect(os.environ["DATABASE_URL"])
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT clase_id, nombre
+            FROM public.clases
+            WHERE clase_id <> 'Pendiente'
+            ORDER BY nombre ASC;
+            """
+        )
+        rows = cur.fetchall()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if "cur" in locals(): cur.close()
+        if "conn" in locals(): conn.close()
+
+    clases = [{"clase_id": clase_id, "nombre": nombre} for clase_id, nombre in rows]
+    return {"found": True, "clases": clases}
+
+@app.get("/reading/next-na")
+def reading_next_na(access_token: str | None = Cookie(default=None)):
+    if not access_token:
+        raise HTTPException(status_code=401, detail="No autenticado")
+
+    try:
+        payload = jwt.decode(access_token, JWT_SECRET, algorithms=[JWT_ALG])
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Token inválido")
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Token inválido")
+
+    try:
+        conn = psycopg2.connect(os.environ["DATABASE_URL"])
+        conn.autocommit = False
+        cur = conn.cursor()
+
+        cur.execute(
+            """
+            SELECT l.lectura_id, l.img_id, l.posicion, i.url
+            FROM public.lecturas l
+            JOIN public.imagenes i
+              ON i.img_id = l.img_id
+            WHERE l.user_id = %s
+              AND l.modo_id = 0
+              AND l.diagnostico_clase_id = 'Pendiente'
+            ORDER BY l.posicion
+            LIMIT 1
+            FOR UPDATE;
+            """,
+            (user_id,)
+        )
+        row = cur.fetchone()
+
+        if not row:
+            conn.commit()
+            return {"found": False, "message": "No hay lecturas pendientes en modo no asistido"}
+
+        lectura_id, img_id, posicion, url = row
+
+        cur.execute(
+            """
+            UPDATE public.lecturas
+            SET start = COALESCE(start, NOW())
+            WHERE lectura_id = %s
+            """,
+            (lectura_id,)
+        )
+
+        conn.commit()
+
+    except Exception as e:
+        if "conn" in locals():
+            conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if "cur" in locals(): cur.close()
+        if "conn" in locals(): conn.close()
+
+    return {
+        "found": True,
+        "lectura_id": lectura_id,
+        "img_id": img_id,
+        "posicion": posicion,
+        "url": url,
+        "modo_id": 0
+    }
+
+@app.post("/reading/submit-na")
+def submit_reading_na(
+    data: SubmitDiagnosisRequest,
+    access_token: str | None = Cookie(default=None)
+):
+    if not access_token:
+        raise HTTPException(status_code=401, detail="No autenticado")
+
+    try:
+        payload = jwt.decode(access_token, JWT_SECRET, algorithms=[JWT_ALG])
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Token inválido")
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Token inválido")
+
+    try:
+        conn = psycopg2.connect(os.environ["DATABASE_URL"])
+        conn.autocommit = False
+        cur = conn.cursor()
+
+        cur.execute(
+            """
+            SELECT lectura_id
+            FROM public.lecturas
+            WHERE lectura_id = %s
+              AND user_id = %s
+              AND modo_id = 0
+              AND diagnostico_clase_id = 'Pendiente'
+            FOR UPDATE;
+            """,
+            (data.lectura_id, user_id)
+        )
+        row = cur.fetchone()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Lectura no encontrada o ya finalizada")
+
+        cur.execute(
+            """
+            UPDATE public.lecturas
+            SET diagnostico_clase_id = %s,
+                done = NOW()
+            WHERE lectura_id = %s
+            """,
+            (data.diagnostico_clase_id, data.lectura_id)
+        )
+
+        conn.commit()
+
+    except HTTPException:
+        if "conn" in locals():
+            conn.rollback()
+        raise
+    except Exception as e:
+        if "conn" in locals():
+            conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if "cur" in locals(): cur.close()
+        if "conn" in locals(): conn.close()
+
+    return {"success": True, "lectura_id": data.lectura_id}
